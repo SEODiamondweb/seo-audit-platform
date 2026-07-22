@@ -1,0 +1,31 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+/dist
+
+# env & secrets — NEVER commit credentials or license data
+.env
+.env.local
+.env.*.local
+*.seospiderconfig
+/licenses
+
+# screaming frog working data
+/data/crawls
+/data/exports
+/data/uploads
+/tmp
+
+# misc
+.DS_Store
+*.log
+/coverage

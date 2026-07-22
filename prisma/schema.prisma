@@ -1,0 +1,394 @@
+// Prisma schema for the SEO Audit Platform.
+// Datasource credentials come from the environment only (never committed).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum AuditSource {
+  SCREAMING_FROG_CLI
+  MANUAL_IMPORT
+}
+
+enum AuditStatus {
+  DRAFT
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  EXPORTING
+  IMPORTING
+  COMPLETED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+enum ImportStatus {
+  PENDING
+  PARSING
+  MAPPED
+  IMPORTED
+  PARTIAL
+  FAILED
+}
+
+enum Indexability {
+  INDEXABLE
+  NON_INDEXABLE
+  UNKNOWN
+}
+
+enum IssueCategory {
+  CRAWLABILITY // scansione e indicizzazione
+  STATUS_CODE
+  REDIRECT
+  CANONICAL
+  METADATA
+  HEADING
+  CONTENT
+  INTERNAL_LINKING
+  IMAGES
+  SITEMAP
+  ROBOTS
+  HREFLANG
+  STRUCTURED_DATA
+  PERFORMANCE
+  SECURITY
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+enum Priority {
+  P0
+  P1
+  P2
+  P3
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  IGNORED
+  WONT_FIX
+}
+
+enum Effort {
+  TRIVIAL
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+enum ReportFormat {
+  HTML
+  PDF
+  CSV
+}
+
+// ============================================================================
+// Tenancy & users
+// ============================================================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users   User[]
+  clients Client[]
+}
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String       @unique
+  name           String?
+  role           Role         @default(MEMBER)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  assignedIssues AuditIssue[] @relation("IssueAssignee")
+  assignedTasks  Task[]       @relation("TaskAssignee")
+}
+
+// ============================================================================
+// Clients / projects
+// ============================================================================
+
+model Client {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  contactEmail   String?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  projects Project[]
+
+  @@index([organizationId])
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  domain    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  audits Audit[]
+  jobs   ScreamingFrogJob[]
+  tasks  Task[]
+
+  @@index([clientId])
+}
+
+// ============================================================================
+// Audits & data sources
+// ============================================================================
+
+model Audit {
+  id         String      @id @default(cuid())
+  projectId  String
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  label      String
+  auditDate  DateTime    @default(now())
+  source     AuditSource
+  status     AuditStatus @default(DRAFT)
+  // Configuration snapshot used for this audit (crawl config or import config).
+  config     Json?
+  // SEO score 0..100 computed by the audit engine.
+  score      Int?
+  scoreBreakdown Json?
+  totalUrls  Int         @default(0)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  job          ScreamingFrogJob?
+  importedFile ImportedFile?
+  urls         CrawledUrl[]
+  issues       AuditIssue[]
+  reports      Report[]
+
+  @@index([projectId])
+  @@index([projectId, auditDate])
+}
+
+model ScreamingFrogJob {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditId      String?   @unique
+  audit        Audit?    @relation(fields: [auditId], references: [id], onDelete: SetNull)
+  bullJobId    String?
+  status       JobStatus @default(QUEUED)
+  domain       String
+  config       Json
+  progress     Int       @default(0)
+  message      String?
+  errorMessage String?
+  exportPath   String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model ImportedFile {
+  id           String       @id @default(cuid())
+  auditId      String       @unique
+  audit        Audit        @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  originalName String
+  storedPath   String
+  mimeType     String?
+  sizeBytes    Int?
+  status       ImportStatus @default(PENDING)
+  // Column mapping used to reconcile Screaming Frog version/config differences.
+  columnMapping Json?
+  rowsTotal     Int         @default(0)
+  rowsImported  Int         @default(0)
+  rowsSkipped   Int         @default(0)
+  unknownColumns Json?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+// ============================================================================
+// Crawled URLs (one row per URL of a crawl/import)
+// ============================================================================
+
+model CrawledUrl {
+  id             String        @id @default(cuid())
+  auditId        String
+  audit          Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  url            String
+  contentType    String?
+  statusCode     Int?
+  indexability   Indexability  @default(UNKNOWN)
+  indexabilityStatus String?
+  title          String?
+  titleLength    Int?
+  metaDescription String?
+  metaDescriptionLength Int?
+  h1             String?
+  h2             String?
+  canonical      String?
+  metaRobots     String?
+  hreflang       String?
+  wordCount      Int?
+  crawlDepth     Int?
+  inlinks        Int?
+  outlinks       Int?
+  redirectUrl    String?
+  responseTimeMs Int?
+  images         Int?
+  imagesMissingAlt Int?
+  structuredData Boolean?
+  structuredDataTypes String?
+  inSitemap      Boolean?
+  // Raw issues detected by Screaming Frog for this URL (list of strings).
+  rawIssues      Json?
+  // Any extra columns we could not map, preserved for transparency.
+  extra          Json?
+  createdAt      DateTime      @default(now())
+
+  issueLinks AuditIssueUrl[]
+
+  @@unique([auditId, url])
+  @@index([auditId])
+  @@index([auditId, statusCode])
+  @@index([auditId, indexability])
+}
+
+// ============================================================================
+// Structured audit issues
+// ============================================================================
+
+model AuditIssue {
+  id           String        @id @default(cuid())
+  auditId      String
+  audit        Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  // Stable rule key (e.g. "META_TITLE_MISSING") for dedup / comparison.
+  ruleKey      String
+  title        String
+  category     IssueCategory
+  severity     Severity
+  priority     Priority
+  description  String
+  seoImpact    String
+  recommendation String
+  effort       Effort        @default(MEDIUM)
+  status       IssueStatus   @default(OPEN)
+  assigneeId   String?
+  assignee     User?         @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  affectedCount Int          @default(0)
+  // Free-form evidence (examples, counts, thresholds).
+  evidence     Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  urls  AuditIssueUrl[]
+  tasks Task[]
+
+  @@unique([auditId, ruleKey])
+  @@index([auditId])
+  @@index([auditId, category])
+  @@index([auditId, severity])
+}
+
+model AuditIssueUrl {
+  id        String     @id @default(cuid())
+  issueId   String
+  issue     AuditIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  urlId     String
+  url       CrawledUrl @relation(fields: [urlId], references: [id], onDelete: Cascade)
+  // Rule-specific evidence for this particular URL (e.g. the offending value).
+  evidence  String?
+
+  @@unique([issueId, urlId])
+  @@index([issueId])
+  @@index([urlId])
+}
+
+// ============================================================================
+// Tasks & reports
+// ============================================================================
+
+model Task {
+  id          String     @id @default(cuid())
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issueId     String?
+  issue       AuditIssue? @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  priority    Priority   @default(P2)
+  assigneeId  String?
+  assignee    User?      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  dueDate     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([projectId])
+  @@index([issueId])
+}
+
+model Report {
+  id        String       @id @default(cuid())
+  auditId   String
+  audit     Audit        @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  title     String
+  format    ReportFormat
+  storedPath String?
+  // Rendered/summary payload (executive summary, roadmap, etc.).
+  payload   Json?
+  createdAt DateTime     @default(now())
+
+  @@index([auditId])
+}
