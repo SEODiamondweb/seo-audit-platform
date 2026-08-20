@@ -25,6 +25,7 @@ Niente server pubblico, niente webhook, niente database: il bot gira in **Socket
 - [Docker](#docker)
 - [Sorgenti dati opzionali](#sorgenti-dati-opzionali)
   - [Collegare i tuoi account Search Console](#collegare-i-tuoi-account-search-console)
+- [Avvio automatico su Windows](#avvio-automatico-su-windows)
 - [Una sola istanza alla volta](#una-sola-istanza-alla-volta)
 - [Uso da riga di comando](#uso-da-riga-di-comando)
 - [Come funziona l'audit](#come-funziona-laudit)
@@ -351,6 +352,64 @@ convivono: le proprietà si sommano.
 Non è coperto da nessuna API. Esportalo a mano (Search Console → *Link → Esporta*) ed estrai i
 CSV in `data/gsc/<dominio>/`: vengono riconosciuti dal contenuto, qualunque sia il nome del file.
 La "tossicità" dei link è una metrica proprietaria dei tool a pagamento e non viene stimata.
+
+---
+
+## Avvio automatico su Windows
+
+Il bot puo' partire da solo all'accesso, senza finestre da tenere aperte. La registrazione
+avviene una volta sola, come utente normale (nessun privilegio di amministratore):
+
+```powershell
+$dir = "C:\Users\<utente>\Desktop\slack-seo-audit"
+$action  = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$dir\scripts\bot-start.vbs`"" -WorkingDirectory $dir
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$trigger.Delay = "PT40S"
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 2) `
+  -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName "SEO Audit Bot" -Action $action -Trigger $trigger -Settings $settings
+```
+
+Il ritardo di 40 secondi dopo l'accesso esiste perche' alla partenza la rete puo' non essere
+ancora pronta; il riavvio automatico copre i primi tentativi andati a vuoto.
+
+`scripts/bot-start.vbs` lancia il bot **senza finestra di console** e ne dirotta l'output in
+`data/bot.log`, riscritto a ogni avvio. Nascondere la finestra senza conservare i log
+renderebbe il bot impossibile da diagnosticare.
+
+### Gestione quotidiana
+
+```powershell
+Get-Content data\bot.log -Tail 20
+```
+
+```powershell
+Start-ScheduledTask -TaskName "SEO Audit Bot"
+```
+
+```
+scripts\bot-stop.cmd
+```
+
+Lo script di arresto esiste per una ragione precisa: il lanciatore avvia node e termina
+subito, quindi per Windows l'attivita' e' gia' conclusa mentre il bot continua a girare.
+"Termina attivita'" nell'Utilita' di pianificazione non lo fermerebbe. Lo script legge il PID
+del supervisore dal lock e termina quel solo albero di processi, senza toccare altri
+programmi Node.
+
+Per sospendere l'avvio automatico senza disinstallare nulla:
+
+```powershell
+Disable-ScheduledTask -TaskName "SEO Audit Bot"
+```
+
+### Cosa resta scoperto
+
+Il bot vive finche' il PC e' acceso e l'utente ha effettuato l'accesso. Se un collega lancia
+`/seo-audit` a computer spento, il comando non risponde. Per una disponibilita' continua
+serve un VPS con Docker: `docker compose up -d` e la direttiva `restart: unless-stopped`
+gia' presente in `docker-compose.yml`.
 
 ---
 
