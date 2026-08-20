@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyLinksCsv, parseCsv } from '../src/gsc/links';
+import { matchProperty } from '../src/gsc/client';
 
 describe('parser CSV degli export GSC', () => {
   it('gestisce virgolette, virgole nei valori e BOM', () => {
@@ -49,5 +50,53 @@ describe('classificazione degli export del report Link', () => {
   it('scarta i CSV che non sono un report Link', () => {
     expect(classifyLinksCsv(parseCsv('Query,Click\nscarpe rosse,10\n'))).toBeNull();
     expect(classifyLinksCsv(parseCsv('solo intestazione\n'))).toBeNull();
+  });
+});
+
+describe('scelta della proprietà Search Console', () => {
+  const fakeAccount = { keyPath: 'k.json', email: 'bot@p.iam.gserviceaccount.com', getAccessToken: async () => 't' };
+  const prop = (siteUrl: string) => ({ siteUrl, permissionLevel: 'siteOwner', account: fakeAccount });
+
+  it('preferisce la proprietà Dominio, che copre tutte le varianti', () => {
+    const found = matchProperty('example.com', [
+      prop('https://example.com/'),
+      prop('sc-domain:example.com'),
+    ]);
+    expect(found?.siteUrl).toBe('sc-domain:example.com');
+  });
+
+  it('accetta una proprietà URL con lo stesso host', () => {
+    expect(matchProperty('example.com', [prop('https://www.example.com/')])?.siteUrl).toBe(
+      'https://www.example.com/',
+    );
+    expect(matchProperty('www.example.com', [prop('https://example.com/')])?.siteUrl).toBe(
+      'https://example.com/',
+    );
+  });
+
+  it('NON usa la proprietà di un sottodominio per il dominio principale', () => {
+    // Il caso che il criterio severo esiste per prevenire: i dati dello shop
+    // presentati come se fossero quelli del sito.
+    expect(matchProperty('example.com', [prop('https://shop.example.com/')])).toBeNull();
+  });
+
+  it('non confonde domini che condividono un suffisso', () => {
+    expect(matchProperty('example.com', [prop('sc-domain:notexample.com')])).toBeNull();
+    expect(matchProperty('example.com', [prop('https://example.com.mx/')])).toBeNull();
+  });
+
+  it('ritorna null quando non c’è nessuna proprietà', () => {
+    expect(matchProperty('example.com', [])).toBeNull();
+  });
+
+  it('trova la proprietà giusta in un insieme di più account', () => {
+    const altro = { ...fakeAccount, email: 'cliente@x.iam.gserviceaccount.com' };
+    const found = matchProperty('cliente-due.it', [
+      prop('sc-domain:cliente-uno.it'),
+      { siteUrl: 'sc-domain:cliente-due.it', permissionLevel: 'siteOwner', account: altro },
+      prop('https://terzo.it/'),
+    ]);
+    expect(found?.siteUrl).toBe('sc-domain:cliente-due.it');
+    expect(found?.account.email).toBe('cliente@x.iam.gserviceaccount.com');
   });
 });

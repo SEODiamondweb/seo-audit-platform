@@ -626,7 +626,9 @@ function gscSection(audit: AuditResult): string {
     parts.push(
       '<p>Proprietà <strong>' +
         escapeHtml(gsc.property) +
-        '</strong>, dati di ricerca dal ' +
+        '</strong>' +
+        (gsc.viaAccount ? ' (via ' + escapeHtml(gsc.viaAccount) + ')' : '') +
+        ', dati di ricerca dal ' +
         escapeHtml(gsc.periodStart) +
         ' al ' +
         escapeHtml(gsc.periodEnd) +

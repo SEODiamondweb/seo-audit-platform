@@ -1,19 +1,24 @@
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
-import { loadServiceAccount } from './auth';
-import { inspectUrl, querySearchAnalytics, resolveProperty } from './client';
+import { credentialPaths, loadAccounts } from './auth';
+import { inspectUrl, listProperties, matchProperty, querySearchAnalytics } from './client';
 import { loadGscLinks } from './links';
-import type { InspectionResult, SearchRow } from './client';
+import type { InspectionResult, PropertyRef, SearchRow } from './client';
 import type { GscLinksReport } from './links';
 
-export type { InspectionResult, SearchRow } from './client';
+export type { InspectionResult, SearchRow, PropertyRef } from './client';
 export type { GscLinksReport, LinkingSite, LinkedPage } from './links';
+export { credentialPaths, loadAccounts } from './auth';
+export { listProperties, matchProperty } from './client';
 
 /** Quante pagine ispezionare con la URL Inspection API (limite Google: 2000/giorno). */
 const INSPECTION_SAMPLE = 15;
 
 export interface GscReport {
+  /** Proprietà usata, vuota se nessuna corrisponde al dominio. */
   property: string;
+  /** Email del service account attraverso cui la proprietà è stata raggiunta. */
+  viaAccount: string;
   /** Periodo dei dati di ricerca, ISO date. */
   periodStart: string;
   periodEnd: string;
@@ -24,7 +29,7 @@ export interface GscReport {
   /** Stato di indicizzazione e ultima scansione Google di un campione di pagine. */
   inspections: InspectionResult[];
   links: GscLinksReport | null;
-  /** Proprietà a cui il service account ha accesso: mostrate quando il dominio non corrisponde. */
+  /** Tutte le proprietà viste, da tutte le chiavi: diagnostica del mancato match. */
   availableProperties: string[];
   errors: string[];
 }
@@ -33,74 +38,95 @@ function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function emptyReport(overrides: Partial<GscReport>): GscReport {
+  return {
+    property: '',
+    viaAccount: '',
+    periodStart: '',
+    periodEnd: '',
+    totalClicks: 0,
+    totalImpressions: 0,
+    topPages: [],
+    topQueries: [],
+    inspections: [],
+    links: null,
+    availableProperties: [],
+    errors: [],
+    ...overrides,
+  };
+}
+
+/**
+ * Raccoglie tutte le proprietà visibili, attraverso tutte le chiavi configurate.
+ *
+ * Con più account Search Console non servono più chiavi: basta che l'email del service
+ * account sia stata aggiunta come utente alle proprietà, in ciascun account. Più chiavi
+ * servono solo quando un cliente fornisce il proprio service account invece di aggiungere
+ * il nostro; in quel caso le proprietà si sommano.
+ */
+export async function collectProperties(): Promise<{
+  properties: PropertyRef[];
+  errors: string[];
+}> {
+  const { accounts, errors: loadErrors } = await loadAccounts();
+  const errors = loadErrors.map((e) => 'Chiave ' + e.keyPath + ': ' + e.reason);
+  const properties: PropertyRef[] = [];
+
+  const results = await Promise.all(
+    accounts.map(async (account) => {
+      try {
+        return await listProperties(account);
+      } catch (err) {
+        errors.push(
+          'Proprietà di ' + account.email + ': ' + (err instanceof Error ? err.message : String(err)),
+        );
+        return [] as PropertyRef[];
+      }
+    }),
+  );
+
+  for (const list of results) properties.push(...list);
+  return { properties, errors };
+}
+
 /**
  * Raccoglie i dati Search Console per il dominio.
  *
- * Ritorna null se il service account non è configurato o non ha accesso a una proprietà
- * del dominio: in quel caso il report spiega come attivare l'integrazione. Gli errori
- * parziali (es. quota della URL Inspection esaurita) non fanno fallire il resto.
- *
- * Le pagine da ispezionare vengono scelte fra le più importanti: prima quelle con più
- * click reali, poi le più linkate internamente.
+ * Ritorna null solo quando l'integrazione non è configurata affatto e non ci sono nemmeno
+ * export dei link: in ogni altro caso ritorna un report, anche vuoto, perché "collegato ma
+ * proprietà non trovata" è un'informazione che va comunicata, non taciuta.
  */
 export async function collectGscData(
   domain: string,
   candidateUrls: string[],
 ): Promise<GscReport | null> {
-  const account = await loadServiceAccount();
   const links = await loadGscLinks(domain);
+  const configured = credentialPaths().length > 0;
 
-  if (!account) {
-    // Senza API, gli export manuali dei link valgono comunque un report parziale.
+  if (!configured) {
     if (!links) return null;
-    return {
-      property: '',
-      periodStart: '',
-      periodEnd: '',
-      totalClicks: 0,
-      totalImpressions: 0,
-      topPages: [],
-      topQueries: [],
-      inspections: [],
+    return emptyReport({
       links,
-      availableProperties: [],
       errors: ['Service account non configurato: disponibili solo gli export del report Link.'],
-    };
+    });
   }
 
-  const errors: string[] = [];
-
-  let property: string | null = null;
-  let availableProperties: string[] = [];
-  try {
-    const lookup = await resolveProperty(domain);
-    property = lookup.property;
-    availableProperties = lookup.available;
-  } catch (err) {
-    errors.push(err instanceof Error ? err.message : String(err));
-  }
+  const { properties, errors } = await collectProperties();
+  const availableProperties = properties.map((p) => p.siteUrl).sort();
+  const property = matchProperty(domain, properties);
 
   if (!property) {
-    // Comunicare il mancato match è un requisito, non un caso d’errore da nascondere:
-    // il report deve dire "collegato ma questa proprietà manca", mai tacere o inventare.
-    return {
-      property: '',
-      periodStart: '',
-      periodEnd: '',
-      totalClicks: 0,
-      totalImpressions: 0,
-      topPages: [],
-      topQueries: [],
-      inspections: [],
+    return emptyReport({
       links,
       availableProperties,
       errors: [
         ...errors,
         'Nessuna proprietà Search Console corrisponde a ' +
           domain +
-          ': aggiungi l’email del service account come utente (Proprietario richiesto per farlo) nella proprietà di questo dominio.',
+          '. Aggiungi l’email del service account come utente nella proprietà di questo dominio ' +
+          '(Search Console → Impostazioni → Utenti e autorizzazioni), poi rilancia l’audit.',
       ],
-    };
+    });
   }
 
   // I dati di ricerca hanno ~2 giorni di ritardo: si chiudono 28 giorni a ritroso da lì.
@@ -149,19 +175,17 @@ export async function collectGscData(
     }
   }
 
-  const totalClicks = topPages.reduce((sum, row) => sum + row.clicks, 0);
-  const totalImpressions = topPages.reduce((sum, row) => sum + row.impressions, 0);
-
   if (errors.length > 0) {
     logger.warn({ errors }, 'Search Console: raccolta parziale');
   }
 
   return {
-    property,
+    property: property.siteUrl,
+    viaAccount: property.account.email,
     periodStart: isoDate(start),
     periodEnd: isoDate(end),
-    totalClicks,
-    totalImpressions,
+    totalClicks: topPages.reduce((sum, row) => sum + row.clicks, 0),
+    totalImpressions: topPages.reduce((sum, row) => sum + row.impressions, 0),
     topPages,
     topQueries,
     inspections,
@@ -172,5 +196,5 @@ export async function collectGscData(
 }
 
 export function gscIsConfigured(): boolean {
-  return env.GSC_CREDENTIALS_PATH !== '';
+  return credentialPaths().length > 0;
 }

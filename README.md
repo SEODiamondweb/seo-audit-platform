@@ -272,12 +272,45 @@ stato di indicizzazione e **data dell'ultima scansione di Googlebot** pagina per
    account (`...@...iam.gserviceaccount.com`), permesso **Completo**. Serve essere
    **Proprietario** della proprietà per poter aggiungere utenti.
 
-Con più account Search Console non servono più chiavi: si aggiunge la **stessa email** del
-service account alle proprietà di tutti gli account. All'audit il bot confronta il dominio con
-le proprietà visibili e usa quella giusta; il criterio è severo (una proprietà
-`https://shop.example.com` non viene mai usata per un audit di `example.com`) e quando il
-dominio non corrisponde a nessuna proprietà lo dice esplicitamente — su Slack e nel PDF, con
-l'elenco delle proprietà che invece vede — senza mostrare alcun dato.
+### Più account Search Console
+
+In Search Console non si collega un *account*: si autorizza un'**identità** su una *proprietà*.
+Le tue email sono i login umani; il service account è una quarta identità, che va aggiunta come
+utente alle proprietà — in ciascun account.
+
+Quindi con tre account Google **serve una sola chiave**: entri in Search Console con la prima
+email, aggiungi l'email del service account alle proprietà che vedi, poi ripeti con la seconda e
+la terza. Da quel momento quell'unica chiave le vede tutte. Serve essere **Proprietario** della
+proprietà per poter aggiungere utenti.
+
+Per verificare la copertura:
+
+```bash
+npm run gsc
+```
+
+Stampa l'email da incollare e l'elenco delle proprietà attualmente raggiungibili. Passando dei
+domini controlla anche quali sono coperti:
+
+```bash
+npm run gsc -- miosito.it cliente-uno.it cliente-due.it
+```
+
+Un dominio segnato `✗` è un dominio i cui audit non avranno dati Google — meglio scoprirlo qui
+che leggendolo nel PDF.
+
+Più chiavi servono in un solo caso: quando un cliente preferisce fornire il **proprio** service
+account invece di autorizzare il tuo. Si separano con punto e virgola e le proprietà si sommano:
+
+```
+GSC_CREDENTIALS_PATH=C:\Users\tuo\chiave-1.json;C:\Users\tuo\chiave-cliente.json
+```
+
+All'audit il bot cerca il dominio fra tutte le proprietà di tutte le chiavi e usa quella giusta.
+Il criterio è severo (una proprietà `https://shop.example.com` non viene mai usata per un audit
+di `example.com`) e quando il dominio non corrisponde a nessuna proprietà lo dice
+esplicitamente — su Slack e nel PDF, con l'elenco delle proprietà che invece vede — senza
+mostrare alcun dato.
 
 Il report Link non è coperto dall'API: esportalo a mano (GSC → *Link → Esporta*) ed estrai i
 CSV in `data/gsc/<dominio>/`. Vengono riconosciuti dal contenuto, qualunque sia il nome.

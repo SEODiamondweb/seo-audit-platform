@@ -1,11 +1,11 @@
-import { getAccessToken } from './auth';
 import { registrableHost } from '../utils/url';
+import type { GscAccount } from './auth';
 
 /**
  * Client minimale per le API di Search Console.
  *
  * Tre endpoint, tutti in sola lettura:
- *  - sites: per individuare la proprietà giusta fra quelle a cui il service account ha accesso;
+ *  - sites: le proprietà visibili a un service account;
  *  - searchAnalytics: click, impression, CTR e posizione per pagina e per query;
  *  - urlInspection: lo stato di indicizzazione di una URL secondo Google, inclusa la data
  *    dell'ultima scansione di Googlebot — il dato più diretto possibile su "quando Google
@@ -15,9 +15,8 @@ import { registrableHost } from '../utils/url';
 const WEBMASTERS = 'https://www.googleapis.com/webmasters/v3';
 const SEARCHCONSOLE = 'https://searchconsole.googleapis.com/v1';
 
-async function call<T>(url: string, body?: unknown): Promise<T> {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Service account non configurato');
+async function call<T>(account: GscAccount, url: string, body?: unknown): Promise<T> {
+  const token = await account.getAccessToken();
 
   const response = await fetch(url, {
     method: body === undefined ? 'GET' : 'POST',
@@ -35,52 +34,52 @@ async function call<T>(url: string, body?: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
-export interface PropertyLookup {
-  /** La proprietà scelta, o null se nessuna corrisponde davvero al dominio. */
-  property: string | null;
-  /** Tutte le proprietà a cui il service account ha accesso: servono a diagnosticare
-   *  un mancato match ("il collegamento funziona, manca l'aggiunta su questa proprietà"). */
-  available: string[];
+export interface PropertyRef {
+  siteUrl: string;
+  permissionLevel: string;
+  /** Il service account attraverso cui questa proprietà è raggiungibile. */
+  account: GscAccount;
+}
+
+/** Le proprietà visibili a un service account, escluse quelle senza permessi utili. */
+export async function listProperties(account: GscAccount): Promise<PropertyRef[]> {
+  const { siteEntry } = await call<{
+    siteEntry?: { siteUrl: string; permissionLevel: string }[];
+  }>(account, WEBMASTERS + '/sites');
+
+  return (siteEntry ?? [])
+    .filter((s) => s.permissionLevel !== 'siteUnverifiedUser')
+    .map((s) => ({ siteUrl: s.siteUrl, permissionLevel: s.permissionLevel, account }));
 }
 
 /**
- * Trova la proprietà Search Console corrispondente al dominio.
+ * Sceglie fra le proprietà disponibili quella che corrisponde al dominio.
  *
  * Il criterio è volutamente severo: meglio nessun dato che dati di un'altra proprietà.
  * - una proprietà Dominio (sc-domain:) corrisponde se copre il dominio richiesto,
  *   perché per definizione include tutti i sottodomini e i protocolli;
- * - una proprietà URL corrisponde solo se l'host è lo stesso (al netto del www):
- *   https://shop.example.com NON vale per un audit di example.com — conterrebbe
- *   solo i dati dello shop e sembrerebbero i dati del sito.
+ * - una proprietà URL corrisponde solo se l'host è lo stesso, al netto del www:
+ *   https://shop.example.com NON vale per un audit di example.com, perché conterrebbe
+ *   solo i dati dello shop e sembrerebbero quelli del sito.
  */
-export async function resolveProperty(domain: string): Promise<PropertyLookup> {
-  const { siteEntry } = await call<{
-    siteEntry?: { siteUrl: string; permissionLevel: string }[];
-  }>(WEBMASTERS + '/sites');
-
-  const usable = (siteEntry ?? []).filter((s) => s.permissionLevel !== 'siteUnverifiedUser');
-  const available = usable.map((s) => s.siteUrl).sort();
-
+export function matchProperty(domain: string, properties: PropertyRef[]): PropertyRef | null {
   const bare = domain.toLowerCase().replace(/^www\./, '');
   const wanted = registrableHost(domain);
 
-  const domainProperty = usable.find(
-    (s) => s.siteUrl === 'sc-domain:' + wanted || s.siteUrl === 'sc-domain:' + bare,
+  const domainProperty = properties.find(
+    (p) => p.siteUrl === 'sc-domain:' + wanted || p.siteUrl === 'sc-domain:' + bare,
   );
-  if (domainProperty) return { property: domainProperty.siteUrl, available };
+  if (domainProperty) return domainProperty;
 
-  const sameHost = (host: string): boolean => {
-    const h = host.toLowerCase().replace(/^www\./, '');
-    return h === bare;
-  };
-  const urlProperty = usable.find((s) => {
-    try {
-      return sameHost(new URL(s.siteUrl).hostname);
-    } catch {
-      return false;
-    }
-  });
-  return { property: urlProperty?.siteUrl ?? null, available };
+  return (
+    properties.find((p) => {
+      try {
+        return new URL(p.siteUrl).hostname.toLowerCase().replace(/^www\./, '') === bare;
+      } catch {
+        return false;
+      }
+    }) ?? null
+  );
 }
 
 export interface SearchRow {
@@ -92,14 +91,15 @@ export interface SearchRow {
 }
 
 export async function querySearchAnalytics(
-  property: string,
+  property: PropertyRef,
   dimension: 'page' | 'query',
   startDate: string,
   endDate: string,
   rowLimit = 100,
 ): Promise<SearchRow[]> {
   const result = await call<{ rows?: SearchRow[] }>(
-    WEBMASTERS + '/sites/' + encodeURIComponent(property) + '/searchAnalytics/query',
+    property.account,
+    WEBMASTERS + '/sites/' + encodeURIComponent(property.siteUrl) + '/searchAnalytics/query',
     { startDate, endDate, dimensions: [dimension], rowLimit },
   );
   return result.rows ?? [];
@@ -118,7 +118,7 @@ export interface InspectionResult {
   googleCanonical: string | null;
 }
 
-export async function inspectUrl(property: string, url: string): Promise<InspectionResult> {
+export async function inspectUrl(property: PropertyRef, url: string): Promise<InspectionResult> {
   interface Raw {
     inspectionResult?: {
       indexStatusResult?: {
@@ -131,9 +131,9 @@ export async function inspectUrl(property: string, url: string): Promise<Inspect
       };
     };
   }
-  const raw = await call<Raw>(SEARCHCONSOLE + '/urlInspection/index:inspect', {
+  const raw = await call<Raw>(property.account, SEARCHCONSOLE + '/urlInspection/index:inspect', {
     inspectionUrl: url,
-    siteUrl: property,
+    siteUrl: property.siteUrl,
   });
 
   const status = raw.inspectionResult?.indexStatusResult ?? {};
