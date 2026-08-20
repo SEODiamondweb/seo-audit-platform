@@ -10,6 +10,7 @@ import type {
   Severity,
 } from '../audit/types';
 import { escapeHtml, formatPercent, truncate } from '../utils/text';
+import { montserratFontFace } from './fonts';
 import { readabilityLabel } from '../content';
 import { cwvLabel, formatMs } from '../pagespeed';
 import type { PsiLabMetrics, PsiStrategyResult } from '../pagespeed';
@@ -26,12 +27,16 @@ export interface ReportBranding {
 /** Massimo di URL elencate per ogni issue nel PDF: oltre diventa illeggibile. */
 const MAX_URLS_IN_REPORT = 25;
 
+/**
+ * Tinte dei segnali, scelte per il fondo scuro: le versioni da sfondo chiaro risultavano
+ * spente e poco distinguibili fra loro una volta poggiate sul viola profondo.
+ */
 const SEVERITY_COLORS: Record<Severity, string> = {
-  critical: '#b91c1c',
-  high: '#c2410c',
-  medium: '#a16207',
-  low: '#0369a1',
-  info: '#475569',
+  critical: '#ff3d5f',
+  high: '#ff7a3d',
+  medium: '#ffb020',
+  low: '#5b8def',
+  info: '#6f68a8',
 };
 
 const PRIORITY_LABELS: Record<Priority, string> = {
@@ -74,11 +79,12 @@ function formatDuration(ms: number): string {
   return minutes + 'm ' + seconds + 's';
 }
 
+/** Salute di un'area, dal verde al rosso, con saturazione adatta al fondo scuro. */
 function scoreColor(score: number): string {
-  if (score >= 80) return '#15803d';
-  if (score >= 60) return '#a16207';
-  if (score >= 40) return '#c2410c';
-  return '#b91c1c';
+  if (score >= 80) return '#3ddc97';
+  if (score >= 60) return '#ffb020';
+  if (score >= 40) return '#ff7a3d';
+  return '#ff3d5f';
 }
 
 function scoreVerdict(score: number): string {
@@ -806,7 +812,11 @@ function statCard(label: string, value: string | number, hint?: string): string 
   );
 }
 
-export function renderReportHtml(audit: AuditResult, branding: ReportBranding): string {
+export async function renderReportHtml(
+  audit: AuditResult,
+  branding: ReportBranding,
+): Promise<string> {
+  const fontFace = await montserratFontFace();
   const { score, summary, issues, crawl } = audit;
 
   const byPriority: Record<Priority, AuditIssue[]> = { P0: [], P1: [], P2: [], P3: [] };
@@ -916,203 +926,285 @@ export function renderReportHtml(audit: AuditResult, branding: ReportBranding): 
 <meta charset="utf-8">
 <title>SEO Audit ${escapeHtml(audit.domain)}</title>
 <style>
+  ${fontFace}
+
+  /*
+   * Palette scura con accenti a gradiente caldo. Le tinte del gradiente sono usate come
+   * segnale (severita, punteggio, salute di un'area), non come decorazione: su venti pagine
+   * di dati un colore che non significa niente diventa rumore.
+   */
   :root {
+    --bg: #0d0b26;
+    --bg-panel: #16123a;
+    --bg-soft: #1c1748;
+    --ink: #f1f0fb;
+    --muted: #a9a3d4;
+    --line: #2f2a63;
+
     --brand: ${branding.brandColor};
-    --ink: #0f172a;
-    --muted: #64748b;
-    --line: #e2e8f0;
-    --bg-soft: #f8fafc;
+    --accent-1: #ff8a3d;
+    --accent-2: #ff4d8d;
+    --accent-3: #a855f7;
+    --gradient: linear-gradient(120deg, var(--accent-1) 0%, var(--accent-2) 55%, var(--accent-3) 100%);
+
+    --ok: #3ddc97;
+    --ko: #ff5c7a;
   }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: 'Montserrat', 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
     color: var(--ink);
-    font-size: 10.5pt;
-    line-height: 1.55;
+    font-size: 10pt;
+    line-height: 1.6;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  @page { size: A4; margin: 18mm 14mm 20mm; }
+  @page { size: A4; margin: 16mm 14mm 18mm; }
   @page :first { margin: 0; }
 
-  h1, h2, h3, h4 { margin: 0 0 .4em; line-height: 1.25; }
+  h1, h2, h3, h4 { margin: 0 0 .4em; line-height: 1.2; font-weight: 700; }
   p { margin: 0 0 .7em; }
   ul { margin: 0 0 .7em; padding-left: 1.1em; }
+  strong { font-weight: 700; }
 
   /* ── Copertina ───────────────────────────────────────────────────────── */
   .cover {
+    position: relative;
     height: 297mm;
     padding: 26mm 20mm;
-    background: linear-gradient(160deg, var(--brand) 0%, #0f172a 100%);
-    color: #fff;
+    background: var(--bg);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    overflow: hidden;
     page-break-after: always;
   }
-  .cover-logo { max-height: 48px; max-width: 220px; margin-bottom: 18mm; }
-  .cover-kicker { text-transform: uppercase; letter-spacing: .22em; font-size: 9pt; opacity: .8; }
-  .cover h1 { font-size: 34pt; margin: 6mm 0 3mm; letter-spacing: -.02em; }
-  .cover .domain { font-size: 16pt; opacity: .92; word-break: break-all; }
-  .cover-score {
-    margin-top: 14mm;
-    display: flex;
-    align-items: center;
-    gap: 8mm;
+  /* Le sfere sfumate del modello: due masse di colore agli angoli opposti. */
+  .cover::before, .cover::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    z-index: 0;
   }
+  .cover::before {
+    width: 150mm; height: 150mm;
+    right: -55mm; top: -45mm;
+    background: radial-gradient(circle at 35% 35%, #ffb347 0%, var(--accent-2) 45%, transparent 72%);
+    opacity: .85;
+  }
+  .cover::after {
+    width: 130mm; height: 130mm;
+    left: -45mm; bottom: -40mm;
+    background: radial-gradient(circle at 60% 40%, var(--accent-3) 0%, #4c1d95 55%, transparent 75%);
+    opacity: .8;
+  }
+  /* Reticolo sottile, come nel modello: dà profondità senza rubare leggibilità. */
+  .cover-grid {
+    position: absolute; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+    background-size: 14mm 14mm;
+    mask-image: linear-gradient(160deg, rgba(0,0,0,.9), transparent 60%);
+    -webkit-mask-image: linear-gradient(160deg, rgba(0,0,0,.9), transparent 60%);
+  }
+  .cover > * { position: relative; z-index: 1; }
+
+  .cover-logo { max-height: 46px; max-width: 210px; margin-bottom: 14mm; }
+  .cover-kicker {
+    text-transform: uppercase; letter-spacing: .34em; font-size: 8.5pt;
+    font-weight: 600; color: var(--muted);
+  }
+  .cover h1 {
+    font-size: 46pt; font-weight: 800; letter-spacing: -.02em;
+    margin: 6mm 0 4mm; text-transform: uppercase; line-height: .98;
+  }
+  /* La seconda riga del titolo prende il gradiente, come "AUDIT" nel modello. */
+  .cover h1 .accent {
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .cover .domain { font-size: 15pt; font-weight: 600; color: var(--ink); word-break: break-all; }
+  .cover .claim { font-size: 10.5pt; color: var(--muted); max-width: 105mm; margin-top: 3mm; }
+
+  .cover-score { margin-top: 12mm; display: flex; align-items: center; gap: 9mm; }
   .score-ring {
-    /* flex-basis fisso: senza, il cerchio viene schiacciato in un’ellisse */
     flex: 0 0 46mm; box-sizing: border-box;
     width: 46mm; height: 46mm; border-radius: 50%;
-    border: 3mm solid rgba(255,255,255,.28);
+    border: 2mm solid transparent;
+    background:
+      linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
+      var(--gradient) border-box;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: rgba(255,255,255,.08);
   }
-  .score-ring .value { font-size: 30pt; font-weight: 700; line-height: 1; }
-  .score-ring .max { font-size: 9pt; opacity: .75; margin-top: 2mm; }
-  .score-side .grade { font-size: 13pt; font-weight: 600; margin-bottom: 2mm; }
-  .score-side p { font-size: 10pt; opacity: .9; max-width: 90mm; }
-  .cover-foot { font-size: 9pt; opacity: .85; display: flex; justify-content: space-between; }
+  .score-ring .value { font-size: 34pt; font-weight: 800; line-height: 1; }
+  .score-ring .max { font-size: 8.5pt; color: var(--muted); margin-top: 2mm; letter-spacing: .12em; }
+  .score-side .grade { font-size: 13pt; font-weight: 700; margin-bottom: 2mm; }
+  .score-side p { font-size: 10pt; color: var(--muted); max-width: 92mm; }
+  .cover-foot {
+    font-size: 8.5pt; color: var(--muted); display: flex; justify-content: space-between;
+    text-transform: uppercase; letter-spacing: .16em;
+  }
 
   /* ── Struttura ───────────────────────────────────────────────────────── */
   .section { page-break-inside: avoid; margin-bottom: 9mm; }
   .section-title {
-    font-size: 15pt;
-    padding-bottom: 2mm;
-    margin-bottom: 4mm;
-    border-bottom: 2px solid var(--brand);
+    font-size: 17pt; font-weight: 800; text-transform: uppercase; letter-spacing: -.01em;
+    padding-bottom: 3mm; margin-bottom: 5mm; position: relative;
+  }
+  /* Filo a gradiente sotto ogni titolo: è la firma grafica del modello. */
+  .section-title::after {
+    content: ''; position: absolute; left: 0; bottom: 0;
+    width: 32mm; height: 1.2mm; border-radius: 1mm; background: var(--gradient);
   }
   .page-break { page-break-before: always; }
+  .sub-title { font-size: 11.5pt; font-weight: 700; margin-top: 7mm; color: var(--ink); }
 
-  .lead { font-size: 11pt; color: #1e293b; }
+  .lead { font-size: 11pt; color: var(--ink); }
   .callout {
-    background: var(--bg-soft);
-    border-left: 3px solid var(--brand);
-    padding: 4mm 5mm;
-    margin: 4mm 0;
-    font-size: 9.5pt;
+    background: var(--bg-panel);
+    border-left: 1mm solid transparent;
+    border-image: var(--gradient) 1;
+    padding: 4mm 5mm; margin: 4mm 0; font-size: 9.5pt;
   }
   .callout ul { margin: .3em 0 0; }
+  .empty { font-size: 9.5pt; color: var(--muted); font-style: italic; }
 
   /* ── Statistiche ─────────────────────────────────────────────────────── */
   .stats { display: flex; flex-wrap: wrap; gap: 3mm; margin: 4mm 0; }
   .stat {
-    flex: 1 1 30mm;
-    min-width: 30mm;
-    border: 1px solid var(--line);
-    border-radius: 3px;
-    padding: 3mm;
-    text-align: center;
-    background: #fff;
+    flex: 1 1 30mm; min-width: 30mm;
+    background: var(--bg-panel);
+    border: 1px solid var(--line); border-radius: 2mm;
+    padding: 3.5mm 3mm; text-align: center;
   }
-  .stat-value { display: block; font-size: 16pt; font-weight: 700; color: var(--brand); }
-  .stat-label { display: block; font-size: 8pt; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-  .stat-hint { display: block; font-size: 8pt; color: var(--muted); margin-top: 1mm; }
+  .stat-value { display: block; font-size: 17pt; font-weight: 800; color: var(--accent-1); }
+  .stat-label {
+    display: block; font-size: 7.5pt; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .1em; margin-top: 1mm;
+  }
+  .stat-hint { display: block; font-size: 7.5pt; color: var(--muted); margin-top: 1mm; }
 
   /* ── Tabelle ─────────────────────────────────────────────────────────── */
-  table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
   .data-table th, .data-table td, .config-table th, .config-table td {
     border-bottom: 1px solid var(--line);
-    padding: 2mm 2.5mm;
-    text-align: left;
-    vertical-align: top;
+    padding: 2.2mm 2.5mm; text-align: left; vertical-align: top;
   }
-  .data-table thead th { background: var(--bg-soft); font-size: 8.5pt; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .data-table thead th {
+    background: var(--bg-soft); color: var(--ink);
+    font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  }
   .config-table th { width: 45mm; color: var(--muted); font-weight: 600; }
+  .center { text-align: center; }
+  .group-head { background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+  .ok { color: var(--ok); font-weight: 700; }
+  .ko { color: var(--ko); font-weight: 700; }
 
   .cat-name { width: 45mm; font-weight: 600; }
-  .cat-bar { background: var(--line); border-radius: 2px; height: 4mm; width: 100%; }
-  .cat-bar-fill { height: 4mm; border-radius: 2px; }
-  .cat-bar-cell { width: auto; }
+  .cat-bar { background: var(--bg-soft); border-radius: 1mm; height: 3.5mm; width: 100%; }
+  .cat-bar-fill { height: 3.5mm; border-radius: 1mm; }
   .cat-score, .cat-issues, .cat-penalty { width: 18mm; text-align: right; white-space: nowrap; }
 
   /* ── Criticità principali ────────────────────────────────────────────── */
-  .top-list { list-style: none; padding: 0; margin: 0; }
+  .top-list { list-style: none; padding: 0; margin: 0; counter-reset: top; }
   .top-list li { margin-bottom: 4mm; page-break-inside: avoid; }
   .top-issue { display: flex; gap: 4mm; }
   .top-rank {
-    flex: 0 0 8mm; height: 8mm; border-radius: 50%;
-    background: var(--brand); color: #fff;
+    flex: 0 0 9mm; height: 9mm; border-radius: 50%;
+    background: var(--gradient); color: #1a0f2e;
     display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 10pt;
+    font-weight: 800; font-size: 11pt;
   }
+  .top-issue p { margin: 1mm 0; font-size: 9.5pt; color: var(--muted); }
   .top-issue .badge { margin-left: 2mm; vertical-align: 1px; }
-  .top-issue p { margin: 1mm 0; font-size: 9.5pt; color: #334155; }
-  .top-meta { font-size: 8.5pt; color: var(--muted); }
+  .top-meta { font-size: 8pt; color: var(--muted); }
 
   /* ── Issue ───────────────────────────────────────────────────────────── */
   .priority-section { margin-bottom: 8mm; }
   .priority-head {
     display: flex; justify-content: space-between; align-items: baseline;
-    padding: 3mm 4mm; border-radius: 3px; color: #fff; margin-bottom: 2mm;
+    padding: 3mm 4mm; border-radius: 2mm; color: #fff; margin-bottom: 2mm;
+    text-transform: uppercase; letter-spacing: .06em;
   }
-  .priority-head h2 { font-size: 12pt; margin: 0; }
-  .priority-head span { font-size: 9pt; opacity: .9; }
-  .priority-P0 { background: #b91c1c; }
-  .priority-P1 { background: #c2410c; }
-  .priority-P2 { background: #a16207; }
-  .priority-P3 { background: #0369a1; }
+  .priority-head h2 { font-size: 12pt; margin: 0; font-weight: 800; }
+  .priority-head span { font-size: 8.5pt; opacity: .92; }
+  .priority-P0 { background: linear-gradient(100deg, #ff3d5f, #ff8a3d); }
+  .priority-P1 { background: linear-gradient(100deg, #ff6a3d, #ffa63d); }
+  .priority-P2 { background: linear-gradient(100deg, #a855f7, #ff4d8d); }
+  .priority-P3 { background: linear-gradient(100deg, #4f46e5, #7c3aed); }
   .priority-desc { font-size: 9pt; color: var(--muted); margin-bottom: 4mm; }
 
   .issue {
-    border: 1px solid var(--line);
-    border-radius: 3px;
-    margin-bottom: 4mm;
-    page-break-inside: avoid;
+    background: var(--bg-panel);
+    border: 1px solid var(--line); border-radius: 2mm;
+    margin-bottom: 4mm; page-break-inside: avoid; overflow: hidden;
   }
-  .issue-head { padding: 3mm 4mm; background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+  .issue-head { padding: 3.5mm 4mm; border-bottom: 1px solid var(--line); }
   .issue-title { display: flex; align-items: baseline; gap: 3mm; }
-  .issue-index { color: var(--muted); font-size: 9pt; font-weight: 700; }
-  .issue-title h3 { font-size: 11.5pt; margin: 0; }
-  .issue-meta { margin-top: 2mm; display: flex; flex-wrap: wrap; gap: 2mm; }
+  .issue-index { color: var(--accent-1); font-size: 9pt; font-weight: 800; }
+  .issue-title h3 { font-size: 11.5pt; margin: 0; font-weight: 700; }
+  .issue-meta { margin-top: 2.5mm; display: flex; flex-wrap: wrap; gap: 2mm; }
   .badge, .chip {
-    display: inline-block; font-size: 8pt; padding: .8mm 2mm; border-radius: 2px; white-space: nowrap;
+    display: inline-block; font-size: 7.5pt; padding: 1mm 2.2mm; border-radius: 1mm;
+    white-space: nowrap; font-weight: 600;
   }
-  .badge { color: #fff; font-weight: 600; }
-  .chip { background: #fff; border: 1px solid var(--line); color: var(--muted); }
-  .chip-strong { border-color: var(--brand); color: var(--brand); font-weight: 600; }
+  .badge { color: #fff; font-weight: 700; }
+  .chip { background: var(--bg-soft); border: 1px solid var(--line); color: var(--muted); }
+  .chip-strong { border-color: var(--accent-1); color: var(--accent-1); font-weight: 700; }
 
-  .issue-body { padding: 3mm 4mm 4mm; }
-  .issue-desc { font-size: 9.5pt; }
+  .issue-body { padding: 3.5mm 4mm 4mm; }
+  .issue-desc { font-size: 9.5pt; color: var(--ink); }
   .issue-block h4 {
-    font-size: 8.5pt; text-transform: uppercase; letter-spacing: .06em;
-    color: var(--muted); margin: 3mm 0 1mm;
+    font-size: 7.5pt; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--accent-1); margin: 3.5mm 0 1mm; font-weight: 700;
   }
-  .issue-block p { font-size: 9.5pt; margin: 0; }
-  .issue-fix { border-left: 2px solid var(--brand); padding-left: 3mm; background: var(--bg-soft); padding-top: 2mm; padding-bottom: 2mm; }
+  .issue-block p { font-size: 9.5pt; margin: 0; color: var(--muted); }
+  .issue-fix {
+    border-left: .8mm solid transparent; border-image: var(--gradient) 1;
+    padding: 2.5mm 0 2.5mm 3.5mm; margin-top: 2mm;
+  }
+  .issue-fix p { color: var(--ink); }
 
-  .url-table { margin-top: 3mm; font-size: 8.5pt; }
-  .url-table th { text-align: left; padding: 1.5mm 2mm; background: var(--bg-soft); color: var(--muted); font-size: 8pt; text-transform: uppercase; }
-  .url-table td { padding: 1.5mm 2mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .url-table { margin-top: 3mm; font-size: 8pt; }
+  .url-table th {
+    text-align: left; padding: 1.6mm 2mm; background: var(--bg-soft); color: var(--muted);
+    font-size: 7.5pt; text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
+  }
+  .url-table td { padding: 1.6mm 2mm; border-bottom: 1px solid var(--line); vertical-align: top; }
   .url-cell { width: 55%; }
   /* Nel PDF i link restano cliccabili: portano dritti alla pagina da correggere. */
-  a.url-path, .url-path { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; word-break: break-all; }
-  a.url-path { color: var(--brand); text-decoration: none; }
+  a.url-path, .url-path {
+    font-family: 'Consolas', 'SFMono-Regular', 'Liberation Mono', monospace;
+    word-break: break-all;
+  }
+  a.url-path { color: var(--accent-1); text-decoration: none; }
   .evidence-cell { color: var(--muted); }
-  .more-urls { font-size: 8.5pt; color: var(--muted); margin-top: 2mm; font-style: italic; }
+  .more-urls { font-size: 8pt; color: var(--muted); margin-top: 2mm; font-style: italic; }
 
-  /* ── Sottotitoli di sezione ── */
-  .roadmap-sub { font-size: 9pt; color: var(--muted); margin-bottom: 2mm; }
-  .empty { font-size: 9pt; color: var(--muted); font-style: italic; }
+  .roadmap-sub { font-size: 8.5pt; color: var(--muted); margin-bottom: 2mm; }
 
-  .sub-title { font-size: 11.5pt; margin-top: 6mm; color: var(--ink); }
-  .center { text-align: center; }
-  .group-head { background: var(--bg-soft); border-bottom: 1px solid var(--line); }
-  .ok { color: #15803d; font-weight: 600; }
-  .ko { color: #b91c1c; font-weight: 600; }
-  .method { font-size: 9pt; color: #334155; }
-  .method h3 { font-size: 10.5pt; margin-top: 4mm; }
+  .method { font-size: 9pt; color: var(--muted); }
+  .method h3 { font-size: 10.5pt; margin-top: 4mm; color: var(--ink); font-weight: 700; }
+
 </style>
 </head>
 <body>
 
 <section class="cover">
+  <div class="cover-grid"></div>
   <div>
     ${logo}
-    <div class="cover-kicker">SEO Audit tecnico</div>
-    <h1>Analisi tecnica<br>del sito</h1>
+    <div class="cover-kicker">Analisi tecnica</div>
+    <h1>SEO<br><span class="accent">Audit</span></h1>
     <div class="domain">${escapeHtml(audit.domain)}</div>
+    <p class="claim">Scansione tecnica del sito, analisi dei contenuti e dei dati
+    strutturati, velocità e visibilità su Google.</p>
   </div>
 
   <div class="cover-score">

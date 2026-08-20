@@ -161,7 +161,7 @@ export async function runFullAudit(
   const paths = auditPaths(audit);
   const logoDataUri = await loadLogoDataUri();
 
-  const html = renderReportHtml(audit, {
+  const html = await renderReportHtml(audit, {
     brandName: env.REPORT_BRAND_NAME,
     brandColor: env.REPORT_BRAND_COLOR,
     logoDataUri,

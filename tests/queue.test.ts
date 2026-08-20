@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { JobQueue } from '../src/queue/queue';
 import { sleep } from '../src/utils/concurrency';
 
+/** Attende che una condizione diventi vera, entro un limite di sicurezza. */
+async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('Condizione non soddisfatta entro ' + timeoutMs + 'ms');
+    await sleep(10);
+  }
+}
+
 describe('JobQueue', () => {
   it('esegue i job accodati', async () => {
     const queue = new JobQueue(2, 5000);
@@ -37,7 +46,10 @@ describe('JobQueue', () => {
       );
     }
 
-    await sleep(400);
+    // Si attende la condizione, non un tempo fisso: sotto carico sei job da 30ms possono
+    // richiedere piu' di quanto una sleep arbitraria conceda, e il test fallirebbe senza
+    // che nulla sia rotto.
+    await waitFor(() => queue.size === 0);
     expect(peak).toBeLessThanOrEqual(2);
     expect(queue.size).toBe(0);
   });

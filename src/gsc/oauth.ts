@@ -39,11 +39,46 @@ function base64url(buffer: Buffer): string {
   return buffer.toString('base64url');
 }
 
-/** Apre il browser predefinito; se fallisce non è grave, la URL viene comunque stampata. */
+export interface AuthUrlParts {
+  redirectUri: string;
+  state: string;
+  challenge: string;
+}
+
+/** Costruisce la URL di autorizzazione. Estratta per poterne verificare i parametri. */
+export function buildAuthUrl(parts: AuthUrlParts): string {
+  const params = new URLSearchParams({
+    client_id: env.GOOGLE_OAUTH_CLIENT_ID,
+    redirect_uri: parts.redirectUri,
+    response_type: 'code',
+    scope: SCOPES,
+    // offline + consent: garantiscono che Google restituisca un refresh token anche
+    // quando l'account ha già autorizzato l'app in passato.
+    access_type: 'offline',
+    prompt: 'consent',
+    state: parts.state,
+    code_challenge: parts.challenge,
+    code_challenge_method: 'S256',
+  });
+  return AUTH_ENDPOINT + '?' + params.toString();
+}
+
+/**
+ * Apre il browser predefinito; se fallisce non è grave, la URL viene comunque stampata.
+ *
+ * Su Windows non si passa da `cmd /c start`: cmd tratta la `&` come separatore di comandi,
+ * quindi tronca la URL al primo parametro e il browser riceve una richiesta senza
+ * response_type, scope e code_challenge — Google risponde "Required parameter is missing".
+ * `rundll32 url.dll` apre il gestore di protocollo predefinito ricevendo l'argomento
+ * intatto, perché non c'è nessuna shell a interpretarlo.
+ */
 function openBrowser(url: string): void {
   try {
     if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+      spawn('rundll32', ['url.dll,FileProtocolHandler', url], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
     } else if (process.platform === 'darwin') {
       spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
     } else {
@@ -139,21 +174,7 @@ function awaitAuthorizationCode(timeoutMs: number): Promise<AuthCodeResult> {
       const { port } = server.address() as AddressInfo;
       const redirectUri = 'http://127.0.0.1:' + port;
 
-      const params = new URLSearchParams({
-        client_id: env.GOOGLE_OAUTH_CLIENT_ID,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: SCOPES,
-        // offline + consent: garantiscono che Google restituisca un refresh token anche
-        // quando l'account ha già autorizzato l'app in passato.
-        access_type: 'offline',
-        prompt: 'consent',
-        state,
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-      });
-
-      const authUrl = AUTH_ENDPOINT + '?' + params.toString();
+      const authUrl = buildAuthUrl({ redirectUri, state, challenge });
       process.stdout.write(
         '\n  Si apre il browser per l’autorizzazione. Se non si apre, incolla questa URL:\n\n  ' +
           authUrl +

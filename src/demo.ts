@@ -241,7 +241,7 @@ async function main(): Promise<void> {
   const audit = runAudit(buildDemoCrawl(), { requestedBy: 'demo' });
   const paths = auditPaths(audit);
 
-  const html = renderReportHtml(audit, {
+  const html = await renderReportHtml(audit, {
     brandName: env.REPORT_BRAND_NAME,
     brandColor: env.REPORT_BRAND_COLOR,
     logoDataUri: await loadLogoDataUri(),

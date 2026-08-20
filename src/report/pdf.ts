@@ -69,7 +69,7 @@ export async function renderPdf(
     await page.emulateMediaType('print');
 
     const footer = `
-      <div style="width:100%;font-family:Helvetica,Arial,sans-serif;font-size:7pt;color:#94a3b8;
+      <div style="width:100%;font-family:Montserrat,Helvetica,Arial,sans-serif;font-size:7pt;color:#6f68a8;letter-spacing:.08em;
                   padding:0 14mm;display:flex;justify-content:space-between;">
         <span>${escapeForTemplate(options.footerLeft)}</span>
         <span>Pagina <span class="pageNumber"></span> di <span class="totalPages"></span></span>

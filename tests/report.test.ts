@@ -21,8 +21,8 @@ const audit = runAudit(
 
 const branding = { brandName: 'Diamondweb', brandColor: '#1d4ed8' };
 
-describe('report HTML', () => {
-  const html = renderReportHtml(audit, branding);
+describe('report HTML', async () => {
+  const html = await renderReportHtml(audit, branding);
 
   it('produce un documento completo', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true);
@@ -55,7 +55,7 @@ describe('report HTML', () => {
     expect(html).toContain(firstIssue.title);
   });
 
-  it('esegue l escaping del contenuto proveniente dal sito', () => {
+  it('esegue l escaping del contenuto proveniente dal sito', async () => {
     const hostile = runAudit(
       makeCrawlResult([
         makePage({
@@ -71,7 +71,7 @@ describe('report HTML', () => {
         }),
       ]),
     );
-    const hostileHtml = renderReportHtml(hostile, branding);
+    const hostileHtml = await renderReportHtml(hostile, branding);
     expect(hostileHtml).not.toContain('<script>alert(1)</script>');
     expect(hostileHtml).toContain('&lt;script&gt;');
   });
@@ -87,5 +87,33 @@ describe('blocchi Slack', () => {
 
   it('resta entro il limite di 50 blocchi di Slack', () => {
     expect(resultBlocks(audit).length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('identità grafica del report', async () => {
+  const html = await renderReportHtml(audit, branding);
+
+  it('incorpora Montserrat come data URI, senza dipendere dalla rete', () => {
+    // Se il font venisse richiamato da Google Fonts, un rendering offline o in container
+    // produrrebbe un PDF con i caratteri sbagliati.
+    expect(html).toContain('@font-face');
+    expect(html).toContain("font-family: 'Montserrat'");
+    expect(html).toContain('url(data:font/woff2;base64,');
+    expect(html).not.toContain('fonts.googleapis.com');
+  });
+
+  it('dichiara Montserrat come font del documento, con ripieghi di sistema', () => {
+    expect(html).toMatch(/font-family:\s*'Montserrat'[^;]*sans-serif/);
+  });
+
+  it('usa la palette scura del modello', () => {
+    expect(html).toContain('--bg: #0d0b26');
+    expect(html).toContain('--gradient:');
+  });
+
+  it('dipinge lo sfondo sul body, cosi da coprire anche i margini di pagina', () => {
+    // La propagazione dello sfondo del body alla canvas e cio che rende scura l'intera
+    // pagina PDF invece di un rettangolo su carta bianca.
+    expect(html).toMatch(/body\s*\{[^}]*background:\s*var\(--bg\)/);
   });
 });
