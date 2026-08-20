@@ -3,7 +3,15 @@ import path from 'node:path';
 import { env } from './config/env';
 import { logger } from './utils/logger';
 
-const LOCK_FILE = () => path.join(env.DATA_DIR, 'bot.pid');
+/**
+ * Percorso del lock. La cartella e' un parametro con default, non una costante: i test
+ * devono poter usare una directory temporanea, altrimenti manipolerebbero il lock del bot
+ * realmente in esecuzione — arrivando a cancellarlo e permettendo l'avvio di una seconda
+ * istanza, cioe' esattamente il guasto che il lock esiste per prevenire.
+ */
+export function lockFile(baseDir: string = env.DATA_DIR): string {
+  return path.join(baseDir, 'bot.pid');
+}
 
 function isRunning(pid: number): boolean {
   try {
@@ -42,8 +50,8 @@ export class AlreadyRunningError extends Error {
  * Il caso tipico non è l'utente che lancia due volte il comando, ma un `npm run dev` rimasto
  * vivo in un terminale dimenticato.
  */
-export function acquireLock(): () => void {
-  const file = LOCK_FILE();
+export function acquireLock(baseDir: string = env.DATA_DIR): () => void {
+  const file = lockFile(baseDir);
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
   if (fs.existsSync(file)) {

@@ -63,7 +63,8 @@ export async function listProperties(account: GscAccount): Promise<PropertyRef[]
  *   solo i dati dello shop e sembrerebbero quelli del sito.
  */
 export function matchProperty(domain: string, properties: PropertyRef[]): PropertyRef | null {
-  const bare = domain.toLowerCase().replace(/^www\./, '');
+  const host = domain.toLowerCase();
+  const bare = host.replace(/^www\./, '');
   const wanted = registrableHost(domain);
 
   const domainProperty = properties.find(
@@ -71,15 +72,21 @@ export function matchProperty(domain: string, properties: PropertyRef[]): Proper
   );
   if (domainProperty) return domainProperty;
 
-  return (
-    properties.find((p) => {
-      try {
-        return new URL(p.siteUrl).hostname.toLowerCase().replace(/^www\./, '') === bare;
-      } catch {
-        return false;
-      }
-    }) ?? null
-  );
+  const hostOf = (p: PropertyRef): string | null => {
+    try {
+      return new URL(p.siteUrl).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+
+  // L'host esatto viene prima della variante con o senza www. Non è un dettaglio: quando
+  // esistono entrambe le proprietà, quella che non corrisponde all'host realmente servito
+  // è vuota, e per giunta la URL Inspection rifiuta con 403 le URL fuori dal suo prefisso.
+  const exact = properties.find((p) => hostOf(p) === host);
+  if (exact) return exact;
+
+  return properties.find((p) => hostOf(p)?.replace(/^www\./, '') === bare) ?? null;
 }
 
 export interface SearchRow {

@@ -165,15 +165,31 @@ export async function collectGscData(
     }
   }
 
+  // Una proprietà URL copre solo le URL che iniziano con il suo prefisso: ispezionare
+  // https://sito.it/x dentro la proprietà https://www.sito.it/ produce un 403 per ogni URL.
+  // Meglio filtrare prima e dirlo una volta sola, che collezionare quindici errori identici.
+  const prefix = property.siteUrl.startsWith('sc-domain:') ? null : property.siteUrl;
+  const inspectable = prefix === null ? sample : sample.filter((url) => url.startsWith(prefix));
+
+  if (prefix !== null && inspectable.length === 0 && sample.length > 0) {
+    errors.push(
+      'Nessuna delle URL scansionate rientra nella proprietà ' +
+        property.siteUrl +
+        ': il sito risponde su un host diverso da quello della proprietà. Lo stato di ' +
+        'indicizzazione non è disponibile; i dati di ricerca restano validi.',
+    );
+  }
+
   const inspections: InspectionResult[] = [];
-  for (const url of sample) {
+  for (const url of inspectable) {
     try {
       inspections.push(await inspectUrl(property, url));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.push('Ispezione ' + url + ': ' + message);
-      // La quota giornaliera è condivisa: al primo 429 è inutile insistere.
-      if (message.includes('429')) break;
+      // 429 è la quota giornaliera, 403 è un problema di perimetro della proprietà:
+      // in entrambi i casi le richieste successive fallirebbero allo stesso modo.
+      if (message.includes('429') || message.includes('403')) break;
     }
   }
 

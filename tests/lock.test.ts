@@ -1,31 +1,33 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { AlreadyRunningError, acquireLock } from '../src/lock';
-import { env } from '../src/config/env';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AlreadyRunningError, acquireLock, lockFile } from '../src/lock';
 
-const LOCK = path.join(env.DATA_DIR, 'bot.pid');
+// Directory isolata: usare quella reale significherebbe litigare con il bot in esecuzione,
+// e nel peggiore dei casi cancellargli il lock.
+let dir: string;
+let LOCK: string;
 
-function removeLock(): void {
-  try {
-    fs.unlinkSync(LOCK);
-  } catch {
-    /* già assente */
-  }
-}
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'seo-audit-lock-'));
+  LOCK = lockFile(dir);
+});
 
-afterEach(removeLock);
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 describe('lock di istanza singola', () => {
   it('scrive il proprio PID e lo rimuove al rilascio', () => {
-    const release = acquireLock();
+    const release = acquireLock(dir);
     expect(fs.readFileSync(LOCK, 'utf8')).toBe(String(process.pid));
     release();
     expect(fs.existsSync(LOCK)).toBe(false);
   });
 
   it('è idempotente sul rilascio', () => {
-    const release = acquireLock();
+    const release = acquireLock(dir);
     release();
     expect(() => release()).not.toThrow();
   });
@@ -36,7 +38,7 @@ describe('lock di istanza singola', () => {
     fs.mkdirSync(path.dirname(LOCK), { recursive: true });
     fs.writeFileSync(LOCK, String(process.ppid), 'utf8');
 
-    expect(() => acquireLock()).toThrow(AlreadyRunningError);
+    expect(() => acquireLock(dir)).toThrow(AlreadyRunningError);
   });
 
   it('recupera un lock lasciato da un processo terminato', () => {
@@ -44,7 +46,7 @@ describe('lock di istanza singola', () => {
     // PID irrealistico: nessun processo può averlo.
     fs.writeFileSync(LOCK, '4294967000', 'utf8');
 
-    const release = acquireLock();
+    const release = acquireLock(dir);
     expect(fs.readFileSync(LOCK, 'utf8')).toBe(String(process.pid));
     release();
   });
@@ -53,7 +55,7 @@ describe('lock di istanza singola', () => {
     fs.mkdirSync(path.dirname(LOCK), { recursive: true });
     fs.writeFileSync(LOCK, 'non-un-pid', 'utf8');
 
-    const release = acquireLock();
+    const release = acquireLock(dir);
     expect(fs.readFileSync(LOCK, 'utf8')).toBe(String(process.pid));
     release();
   });

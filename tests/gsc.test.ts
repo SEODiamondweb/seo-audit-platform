@@ -100,3 +100,50 @@ describe('scelta della proprietà Search Console', () => {
     expect(found?.account.email).toBe('cliente@x.iam.gserviceaccount.com');
   });
 });
+
+describe('priorità fra proprietà www e non-www', () => {
+  const acc = { keyPath: 'k.json', email: 'bot@x.it', getAccessToken: async () => 't' };
+  const prop = (siteUrl: string) => ({ siteUrl, permissionLevel: 'siteOwner', account: acc });
+
+  it('sceglie l’host esatto quando esistono entrambe le varianti', () => {
+    // Il caso reale che produceva zero dati: con entrambe le proprieta registrate veniva
+    // scelta la www, vuota perche il sito risponde sul non-www, e la URL Inspection
+    // rifiutava ogni URL con 403.
+    const found = matchProperty('atena-energia.com', [
+      prop('https://www.atena-energia.com/'),
+      prop('https://atena-energia.com/'),
+    ]);
+    expect(found?.siteUrl).toBe('https://atena-energia.com/');
+  });
+
+  it('vale anche nell’ordine inverso di elencazione', () => {
+    const found = matchProperty('atena-energia.com', [
+      prop('https://atena-energia.com/'),
+      prop('https://www.atena-energia.com/'),
+    ]);
+    expect(found?.siteUrl).toBe('https://atena-energia.com/');
+  });
+
+  it('sceglie la www quando il sito e servito su www', () => {
+    const found = matchProperty('www.esempio.it', [
+      prop('https://esempio.it/'),
+      prop('https://www.esempio.it/'),
+    ]);
+    expect(found?.siteUrl).toBe('https://www.esempio.it/');
+  });
+
+  it('ripiega sulla variante disponibile quando l’host esatto non c’è', () => {
+    expect(matchProperty('esempio.it', [prop('https://www.esempio.it/')])?.siteUrl).toBe(
+      'https://www.esempio.it/',
+    );
+  });
+
+  it('la proprietà Dominio resta prioritaria su entrambe', () => {
+    const found = matchProperty('esempio.it', [
+      prop('https://www.esempio.it/'),
+      prop('https://esempio.it/'),
+      prop('sc-domain:esempio.it'),
+    ]);
+    expect(found?.siteUrl).toBe('sc-domain:esempio.it');
+  });
+});

@@ -105,6 +105,35 @@ export function parsePsiResponse(json: Json, strategy: PsiStrategy): PsiStrategy
   return { strategy, lab, field };
 }
 
+
+/**
+ * Traduce il rifiuto di PSI in una frase che dice cosa fare.
+ *
+ * Il caso ricorrente e' la quota: senza chiave si usa un contingente anonimo condiviso fra
+ * tutti, che risulta esaurito quasi sempre. Riversare nel report il JSON grezzo di Google
+ * lascerebbe il lettore a chiedersi se il sito abbia un problema, quando il problema e'
+ * soltanto una chiave mancante.
+ */
+function describeFailure(status: number, body: string): string {
+  if (status === 429) {
+    return env.PAGESPEED_API_KEY
+      ? 'quota giornaliera della chiave PageSpeed esaurita: riprova domani o aumenta il limite su Google Cloud Console.'
+      : 'quota anonima esaurita. E il contingente condiviso che Google concede senza chiave, ' +
+          'quasi sempre gia consumato: serve una chiave gratuita in PAGESPEED_API_KEY (vedi README).';
+  }
+  if (status === 400) {
+    return 'Google non e riuscito ad analizzare la pagina (400). Di norma significa che la URL ' +
+      'non e raggiungibile dall esterno o risponde con un errore.';
+  }
+  if (status === 403) {
+    return 'chiave PageSpeed rifiutata (403): verifica che sia valida e che la PageSpeed Insights API sia abilitata sul progetto.';
+  }
+  if (status >= 500) {
+    return 'servizio PageSpeed temporaneamente non disponibile (HTTP ' + status + '): riprova piu tardi.';
+  }
+  return 'HTTP ' + status + ' ' + body.slice(0, 160);
+}
+
 async function fetchStrategy(url: string, strategy: PsiStrategy): Promise<PsiStrategyResult> {
   const params = new URLSearchParams({
     url,
@@ -123,9 +152,7 @@ async function fetchStrategy(url: string, strategy: PsiStrategy): Promise<PsiStr
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(
-        'PSI ' + strategy + ': HTTP ' + response.status + ' ' + body.slice(0, 200),
-      );
+      throw new Error('PSI ' + strategy + ': ' + describeFailure(response.status, body));
     }
     const json = (await response.json()) as Json;
     return parsePsiResponse(json, strategy);
