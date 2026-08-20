@@ -24,6 +24,7 @@ Niente server pubblico, niente webhook, niente database: il bot gira in **Socket
 - [Uso del comando](#uso-del-comando)
 - [Docker](#docker)
 - [Sorgenti dati opzionali](#sorgenti-dati-opzionali)
+  - [Collegare i tuoi account Search Console](#collegare-i-tuoi-account-search-console)
 - [Una sola istanza alla volta](#una-sola-istanza-alla-volta)
 - [Uso da riga di comando](#uso-da-riga-di-comando)
 - [Come funziona l'audit](#come-funziona-laudit)
@@ -256,64 +257,99 @@ Combined Log Format — il default di Apache e nginx). Al prossimo audit del dom
   con l'elenco degli scraper travestiti;
 - le URL in 404 che i motori continuano a richiedere: le prime da redirigere.
 
-### Search Console: service account
+### Collegare i tuoi account Search Console
 
-Con l'API di Search Console il report smette di stimare: è Google a riferire click, query,
+Con Search Console collegata il report smette di stimare: è Google a riferire click, query,
 stato di indicizzazione e **data dell'ultima scansione di Googlebot** pagina per pagina.
+
+Si autorizzano direttamente i **tuoi account Google**. Non si crea nessuna identità nuova e non
+si aggiungono utenti alle proprietà: fai login col browser e il bot vede esattamente le proprietà
+che vedi tu.
+
+#### Una volta sola: il client OAuth
 
 1. [console.cloud.google.com](https://console.cloud.google.com) → crea (o scegli) un progetto.
 2. *API e servizi → Libreria* → abilita **Google Search Console API**.
-3. *API e servizi → Credenziali → Crea credenziali → Account di servizio* → crea, poi apri
-   l'account → *Chiavi → Aggiungi chiave → JSON* → scarica il file.
-4. Salva il file fuori dal repository (es. `C:Users<utente>gsc-key.json`) e imposta
-   `GSC_CREDENTIALS_PATH` nel `.env`.
-5. In [Search Console](https://search.google.com/search-console) → proprietà del sito →
-   *Impostazioni → Utenti e autorizzazioni → Aggiungi utente* → incolla l'email del service
-   account (`...@...iam.gserviceaccount.com`), permesso **Completo**. Serve essere
-   **Proprietario** della proprietà per poter aggiungere utenti.
+3. *API e servizi → Schermata consenso OAuth*:
+   - se i tuoi account sono in un Google Workspace aziendale, scegli **Interno** e hai finito;
+   - altrimenti scegli **Esterno**, compila i campi obbligatori e — passaggio da non
+     saltare — porta lo stato di pubblicazione su **In produzione**.
+4. *API e servizi → Credenziali → Crea credenziali → ID client OAuth* → tipo
+   **Applicazione desktop** → crea.
+5. Copia ID client e client secret nel `.env`:
 
-### Più account Search Console
+```
+GOOGLE_OAUTH_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=...
+```
 
-In Search Console non si collega un *account*: si autorizza un'**identità** su una *proprietà*.
-Le tue email sono i login umani; il service account è una quarta identità, che va aggiunta come
-utente alle proprietà — in ciascun account.
+> **Perché "In produzione" conta.** Finché l'app resta in stato *Test*, Google fa scadere le
+> autorizzazioni **dopo 7 giorni**: il bot smetterebbe di leggere Search Console ogni settimana
+> senza un motivo evidente. In produzione non scadono. L'app resterà "non verificata" — al primo
+> login vedrai un avviso da superare con *Avanzate → Vai a…* — ma è normale per uno strumento
+> interno e non limita nulla nel tuo caso.
 
-Quindi con tre account Google **serve una sola chiave**: entri in Search Console con la prima
-email, aggiungi l'email del service account alle proprietà che vedi, poi ripeti con la seconda e
-la terza. Da quel momento quell'unica chiave le vede tutte. Serve essere **Proprietario** della
-proprietà per poter aggiungere utenti.
+#### Per ogni account: il login
 
-Per verificare la copertura:
+```bash
+npm run gsc:login
+```
+
+Si apre il browser, scegli l'account, autorizzi. Il comando conferma quale account ha collegato
+e ti elenca subito le proprietà che vede. **Rilancialo per il secondo e il terzo account.**
+
+Comandi correlati:
+
+```bash
+npm run gsc:login -- --list
+```
+
+```bash
+npm run gsc:login -- --remove mario@esempio.it
+```
+
+Il secondo scollega l'account e **revoca** l'autorizzazione lato Google.
+
+#### Verificare la copertura
 
 ```bash
 npm run gsc
 ```
 
-Stampa l'email da incollare e l'elenco delle proprietà attualmente raggiungibili. Passando dei
-domini controlla anche quali sono coperti:
+Elenca gli account collegati e tutte le proprietà raggiungibili, raggruppate per account.
+Passando dei domini controlla anche quali sono coperti:
 
 ```bash
 npm run gsc -- miosito.it cliente-uno.it cliente-due.it
 ```
 
 Un dominio segnato `✗` è un dominio i cui audit non avranno dati Google — meglio scoprirlo qui
-che leggendolo nel PDF.
+che leggendolo nel PDF. Il comando esce con codice diverso da zero se manca qualcosa, quindi si
+può usare in uno script.
 
-Più chiavi servono in un solo caso: quando un cliente preferisce fornire il **proprio** service
-account invece di autorizzare il tuo. Si separano con punto e virgola e le proprietà si sommano:
+All'audit il bot cerca il dominio fra tutte le proprietà di tutti gli account e usa quella
+giusta. Il criterio è severo — una proprietà `https://shop.example.com` non viene mai usata per
+un audit di `example.com` — e quando nessuna proprietà corrisponde lo dice esplicitamente, su
+Slack e nel PDF, con l'elenco di quelle che invece vede, **senza mostrare dati altrui**.
 
-```
-GSC_CREDENTIALS_PATH=C:\Users\tuo\chiave-1.json;C:\Users\tuo\chiave-cliente.json
-```
+#### Dove finiscono le autorizzazioni
 
-All'audit il bot cerca il dominio fra tutte le proprietà di tutte le chiavi e usa quella giusta.
-Il criterio è severo (una proprietà `https://shop.example.com` non viene mai usata per un audit
-di `example.com`) e quando il dominio non corrisponde a nessuna proprietà lo dice
-esplicitamente — su Slack e nel PDF, con l'elenco delle proprietà che invece vede — senza
-mostrare alcun dato.
+In `data/gsc-accounts.json`, che è escluso da git. Contiene i refresh token: sono credenziali,
+trattale come tali. Per revocare tutto in blocco:
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
-Il report Link non è coperto dall'API: esportalo a mano (GSC → *Link → Esporta*) ed estrai i
-CSV in `data/gsc/<dominio>/`. Vengono riconosciuti dal contenuto, qualunque sia il nome.
+#### Service account (alternativa)
+
+Se un cliente preferisce autorizzare un'identità dedicata invece del tuo account personale, il
+bot accetta anche chiavi di service account. Si scaricano da Google Cloud (*Credenziali → Account
+di servizio → Chiavi → JSON*), l'email va aggiunta come utente nella proprietà, e il percorso in
+`GSC_CREDENTIALS_PATH` — più chiavi separate da punto e virgola. Account OAuth e service account
+convivono: le proprietà si sommano.
+
+#### Report Link
+
+Non è coperto da nessuna API. Esportalo a mano (Search Console → *Link → Esporta*) ed estrai i
+CSV in `data/gsc/<dominio>/`: vengono riconosciuti dal contenuto, qualunque sia il nome del file.
 La "tossicità" dei link è una metrica proprietaria dei tool a pagamento e non viene stimata.
 
 ---

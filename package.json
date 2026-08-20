@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev:watch": "tsx watch src/bot.ts",
-    "gsc": "tsx src/gsc-check.ts"
+    "gsc": "tsx src/gsc-check.ts",
+    "gsc:login": "tsx src/gsc-login.ts"
   },
   "dependencies": {
     "@slack/bolt": "^3.19.0",

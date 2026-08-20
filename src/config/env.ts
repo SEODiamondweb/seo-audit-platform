@@ -56,6 +56,12 @@ const schema = z.object({
   // Vuoto = integrazione disattivata. La chiave non va mai committata.
   GSC_CREDENTIALS_PATH: z.string().optional().default(''),
 
+  // Client OAuth (tipo 'Applicazione desktop') per autorizzare i propri account Google.
+  // Il client secret di un'app installata non e un vero segreto: chi ha il programma lo ha.
+  // La sicurezza del flusso poggia su PKCE, non su di esso.
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional().default(''),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional().default(''),
+
   REPORT_BRAND_NAME: str('SEO Audit'),
   REPORT_BRAND_COLOR: str('#1d4ed8').refine(
     (v) => /^#[0-9a-fA-F]{6}$/.test(v),

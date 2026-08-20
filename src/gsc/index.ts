@@ -1,6 +1,5 @@
-import { env } from '../config/env';
 import { logger } from '../utils/logger';
-import { credentialPaths, loadAccounts } from './auth';
+import { credentialPaths, hasAnyAccount, loadAccounts } from './auth';
 import { inspectUrl, listProperties, matchProperty, querySearchAnalytics } from './client';
 import { loadGscLinks } from './links';
 import type { InspectionResult, PropertyRef, SearchRow } from './client';
@@ -8,7 +7,8 @@ import type { GscLinksReport } from './links';
 
 export type { InspectionResult, SearchRow, PropertyRef } from './client';
 export type { GscLinksReport, LinkingSite, LinkedPage } from './links';
-export { credentialPaths, loadAccounts } from './auth';
+export { credentialPaths, hasAnyAccount, loadAccounts } from './auth';
+export type { GscAccount, AccountKind } from './auth';
 export { listProperties, matchProperty } from './client';
 
 /** Quante pagine ispezionare con la URL Inspection API (limite Google: 2000/giorno). */
@@ -17,7 +17,7 @@ const INSPECTION_SAMPLE = 15;
 export interface GscReport {
   /** Proprietà usata, vuota se nessuna corrisponde al dominio. */
   property: string;
-  /** Email del service account attraverso cui la proprietà è stata raggiunta. */
+  /** Email dell’account attraverso cui la proprietà è stata raggiunta. */
   viaAccount: string;
   /** Periodo dei dati di ricerca, ISO date. */
   periodStart: string;
@@ -29,7 +29,7 @@ export interface GscReport {
   /** Stato di indicizzazione e ultima scansione Google di un campione di pagine. */
   inspections: InspectionResult[];
   links: GscLinksReport | null;
-  /** Tutte le proprietà viste, da tutte le chiavi: diagnostica del mancato match. */
+  /** Tutte le proprietà viste, da tutti gli account: diagnostica del mancato match. */
   availableProperties: string[];
   errors: string[];
 }
@@ -59,17 +59,16 @@ function emptyReport(overrides: Partial<GscReport>): GscReport {
 /**
  * Raccoglie tutte le proprietà visibili, attraverso tutte le chiavi configurate.
  *
- * Con più account Search Console non servono più chiavi: basta che l'email del service
- * account sia stata aggiunta come utente alle proprietà, in ciascun account. Più chiavi
- * servono solo quando un cliente fornisce il proprio service account invece di aggiungere
- * il nostro; in quel caso le proprietà si sommano.
+ * Gli account collegati via OAuth e gli eventuali service account concorrono insieme:
+ * le proprietà raggiungibili si sommano, e ogni proprietà ricorda da quale identità
+ * è stata vista, così il report può dirlo.
  */
 export async function collectProperties(): Promise<{
   properties: PropertyRef[];
   errors: string[];
 }> {
   const { accounts, errors: loadErrors } = await loadAccounts();
-  const errors = loadErrors.map((e) => 'Chiave ' + e.keyPath + ': ' + e.reason);
+  const errors = loadErrors.map((e) => e.source + ': ' + e.reason);
   const properties: PropertyRef[] = [];
 
   const results = await Promise.all(
@@ -101,13 +100,16 @@ export async function collectGscData(
   candidateUrls: string[],
 ): Promise<GscReport | null> {
   const links = await loadGscLinks(domain);
-  const configured = credentialPaths().length > 0;
+  const configured = await hasAnyAccount();
 
   if (!configured) {
     if (!links) return null;
     return emptyReport({
       links,
-      errors: ['Service account non configurato: disponibili solo gli export del report Link.'],
+      errors: [
+        'Nessun account Google collegato: disponibili solo gli export del report Link. ' +
+          'Collega un account con: npm run gsc:login',
+      ],
     });
   }
 
@@ -123,8 +125,8 @@ export async function collectGscData(
         ...errors,
         'Nessuna proprietà Search Console corrisponde a ' +
           domain +
-          '. Aggiungi l’email del service account come utente nella proprietà di questo dominio ' +
-          '(Search Console → Impostazioni → Utenti e autorizzazioni), poi rilancia l’audit.',
+          '. Se il dominio appartiene a un altro dei tuoi account Google, collegalo con ' +
+          '"npm run gsc:login" e rilancia l’audit.',
       ],
     });
   }
@@ -193,8 +195,4 @@ export async function collectGscData(
     availableProperties,
     errors,
   };
-}
-
-export function gscIsConfigured(): boolean {
-  return credentialPaths().length > 0;
 }
