@@ -1,59 +1,91 @@
-import { describe, it, expect } from "vitest";
-import { renderReportHtml, renderReportCsv, type ReportData } from "@/lib/report/report";
+import { describe, expect, it } from 'vitest';
+import { runAudit } from '../src/audit/engine';
+import { renderReportHtml } from '../src/report/html';
+import { resultBlocks } from '../src/slack/blocks';
+import { makeCrawlResult, makePage } from './factories';
 
-const data: ReportData = {
-  auditLabel: "Audit Q3",
-  projectName: "Example",
-  clientName: "ACME",
-  domain: "example.com",
-  auditDate: "2026-07-21",
-  score: 68,
-  totalUrls: 120,
-  counts: { CRITICAL: 1, HIGH: 2, MEDIUM: 3, LOW: 4, INFO: 0 },
-  issues: [
-    {
-      ruleKey: "STATUS_5XX",
-      title: "Errori server",
-      category: "STATUS_CODE",
-      severity: "CRITICAL",
-      priority: "P0",
-      description: "d",
-      seoImpact: "impatto",
-      recommendation: "fix",
-      effort: "HIGH",
-      affectedCount: 4,
-      sampleUrls: ["https://example.com/a"],
-    },
-  ],
-  roadmap: [
-    { window: "30", issues: [] },
-    { window: "60", issues: [] },
-    { window: "90", issues: [] },
-  ],
-};
+const audit = runAudit(
+  makeCrawlResult([
+    makePage({ url: 'https://example.com/', title: null, titleLength: 0 }),
+    makePage({
+      url: 'https://example.com/rotta',
+      depth: 1,
+      statusCode: 404,
+      indexable: false,
+      indexabilityStatus: 'Client Error',
+      uniqueInlinks: 4,
+    }),
+    makePage({ url: 'https://example.com/scarna', depth: 2, wordCount: 30, h1: [] }),
+  ]),
+);
 
-describe("report rendering", () => {
-  it("renders self-contained HTML with score and issues", () => {
-    const html = renderReportHtml(data);
-    expect(html).toContain("<!doctype html>");
-    expect(html).toContain("68");
-    expect(html).toContain("Errori server");
-    expect(html).toContain("Executive Summary");
-    expect(html).toContain("Roadmap 30 / 60 / 90");
+const branding = { brandName: 'Diamondweb', brandColor: '#1d4ed8' };
+
+describe('report HTML', () => {
+  const html = renderReportHtml(audit, branding);
+
+  it('produce un documento completo', () => {
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html).toContain('</html>');
   });
 
-  it("escapes HTML in values", () => {
-    const html = renderReportHtml({
-      ...data,
-      issues: [{ ...data.issues[0], title: "<script>x</script>" }],
-    });
-    expect(html).not.toContain("<script>x</script>");
-    expect(html).toContain("&lt;script&gt;");
+  it('include tutte le sezioni previste', () => {
+    for (const section of [
+      'Executive summary',
+      'Punteggio per area tecnica',
+      'Criticità principali',
+      'Problemi rilevati per priorità',
+      'Metodologia e configurazione',
+    ]) {
+      expect(html).toContain(section);
+    }
   });
 
-  it("renders CSV with header and rows", () => {
-    const csv = renderReportCsv(data);
-    expect(csv.split("\n")[0]).toContain("ruleKey");
-    expect(csv).toContain("STATUS_5XX");
+  it('mostra dominio, punteggio e branding', () => {
+    expect(html).toContain('example.com');
+    expect(html).toContain(String(audit.score.total));
+    expect(html).toContain('Diamondweb');
+    expect(html).toContain('#1d4ed8');
+  });
+
+  it('elenca le issue rilevate con la soluzione consigliata', () => {
+    expect(html).toContain('Soluzione consigliata');
+    expect(html).toContain('Impatto SEO');
+    const firstIssue = audit.issues[0];
+    expect(html).toContain(firstIssue.title);
+  });
+
+  it('esegue l escaping del contenuto proveniente dal sito', () => {
+    const hostile = runAudit(
+      makeCrawlResult([
+        makePage({
+          url: 'https://example.com/',
+          title: '<script>alert(1)</script>',
+          titleLength: 25,
+        }),
+        makePage({
+          url: 'https://example.com/due',
+          depth: 1,
+          title: '<script>alert(1)</script>',
+          titleLength: 25,
+        }),
+      ]),
+    );
+    const hostileHtml = renderReportHtml(hostile, branding);
+    expect(hostileHtml).not.toContain('<script>alert(1)</script>');
+    expect(hostileHtml).toContain('&lt;script&gt;');
+  });
+});
+
+describe('blocchi Slack', () => {
+  it('costruisce un messaggio di riepilogo valido', () => {
+    const blocks = resultBlocks(audit);
+    expect(blocks[0].type).toBe('header');
+    expect(JSON.stringify(blocks)).toContain('example.com');
+    expect(JSON.stringify(blocks)).toContain(String(audit.score.total));
+  });
+
+  it('resta entro il limite di 50 blocchi di Slack', () => {
+    expect(resultBlocks(audit).length).toBeLessThanOrEqual(50);
   });
 });

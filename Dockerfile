@@ -1,37 +1,38 @@
-# ---------- Base ----------
-FROM node:22-slim AS base
-ENV PNPM_HOME="/pnpm"
+# ── build stage ───────────────────────────────────────────────────────────────
+FROM node:20-bookworm-slim AS build
 WORKDIR /app
-# openssl is required by Prisma engines
-RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
-
-# ---------- Dependencies ----------
-FROM base AS deps
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json package-lock.json* ./
-RUN npm install
-
-# ---------- Builder ----------
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-RUN npx prisma generate
+RUN npm install --no-audit --no-fund
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
-# ---------- Runner (Next.js app) ----------
-FROM base AS runner
-ENV NODE_ENV=production
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-EXPOSE 3000
-CMD ["node", "server.js"]
+# ── runtime stage ─────────────────────────────────────────────────────────────
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
 
-# ---------- Worker (BullMQ) ----------
-FROM base AS worker
-ENV NODE_ENV=production
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-RUN npx prisma generate
-CMD ["npx", "tsx", "src/worker/index.ts"]
+# Chromium di sistema: evita il download del bundle Puppeteer e riduce l'immagine.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium \
+      fonts-liberation \
+      fonts-dejavu-core \
+      ca-certificates \
+      dumb-init \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    DATA_DIR=/app/data
+
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+
+COPY --from=build /app/dist ./dist
+
+RUN mkdir -p /app/data && chown -R node:node /app
+USER node
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/index.js"]

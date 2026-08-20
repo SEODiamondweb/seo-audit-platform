@@ -1,66 +1,18 @@
 services:
-  postgres:
-    image: postgres:16-alpine
+  bot:
+    build: .
+    container_name: slack-seo-audit
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: seo
-      POSTGRES_PASSWORD: seo
-      POSTGRES_DB: seo_audit
-    ports:
-      - "5432:5432"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      DATA_DIR: /app/data
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U seo -d seo_audit"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  app:
-    build:
-      context: .
-      target: runner
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_audit?schema=public
-      REDIS_URL: redis://redis:6379
-    ports:
-      - "3000:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - crawldata:/app/data
-
-  worker:
-    build:
-      context: .
-      target: worker
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_audit?schema=public
-      REDIS_URL: redis://redis:6379
-      # Mount / install Screaming Frog on the host and point SF_CLI_PATH to it.
-      # Left empty here → worker accepts jobs but reports manual-import-only.
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - crawldata:/app/data
+      - audit-data:/app/data
+    # Chromium headless ha bisogno di piu' shared memory del default (64MB)
+    shm_size: "512mb"
+    init: true
 
 volumes:
-  pgdata:
-  crawldata:
+  audit-data:

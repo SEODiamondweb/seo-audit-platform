@@ -1,9 +1,0 @@
-Address,Content Type,Status Code,Indexability,Indexability Status,Title 1,Title 1 Length,Meta Description 1,Meta Description 1 Length,H1-1,Canonical Link Element 1,Meta Robots 1,Word Count,Crawl Depth,Inlinks,Outlinks,Redirect URL,Response Time,Images,Images Missing Alt Text,In Sitemap
-https://demo-shop.example/,text/html,200,Indexable,,Demo Shop — Home,16,Benvenuto nel Demo Shop,23,Demo Shop,https://demo-shop.example/,"index, follow",950,0,120,45,,0.21,8,0,true
-https://demo-shop.example/catalogo,text/html,200,Indexable,,Catalogo prodotti,17,Sfoglia il catalogo completo,28,Catalogo,https://demo-shop.example/catalogo,"index, follow",420,1,60,80,,0.34,20,3,true
-https://demo-shop.example/prodotto-a,text/html,200,Indexable,,,0,,0,Prodotto A,https://demo-shop.example/prodotto-a,"index, follow",150,2,4,15,,0.9,5,5,false
-https://demo-shop.example/vecchia-pagina,text/html,301,Non-Indexable,Redirected,Vecchia pagina,14,,0,,,"index, follow",0,3,2,0,https://demo-shop.example/nuova-pagina,0.15,0,0,false
-https://demo-shop.example/errore,text/html,404,Non-Indexable,Client Error,Pagina non trovata,18,,0,,,"index, follow",0,3,7,0,,0.12,0,0,false
-https://demo-shop.example/lenta,text/html,200,Indexable,,Pagina lenta,12,Una pagina con TTFB alto,24,Pagina lenta,https://demo-shop.example/lenta,"index, follow",700,2,3,10,,2.4,6,0,true
-http://demo-shop.example/insecure,text/html,200,Indexable,,Pagina non sicura,17,Servita su HTTP,15,Pagina non sicura,http://demo-shop.example/insecure,"index, follow",300,4,1,5,,0.5,2,0,false
-https://demo-shop.example/noindex,text/html,200,Non-Indexable,noindex,Pagina noindex,14,Pagina esclusa dall'indice,26,Noindex,https://demo-shop.example/noindex,"noindex, follow",500,2,3,8,,0.3,3,1,false

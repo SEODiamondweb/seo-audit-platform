@@ -1,0 +1,51 @@
+# Manifest dell'app Slack.
+#
+# Uso: https://api.slack.com/apps -> Create New App -> From an app manifest
+#      -> scegli il workspace -> incolla questo file -> Create
+#
+# Configura in un colpo solo: bot user, i 4 scope necessari, il comando /seo-audit
+# e il Socket Mode (per cui non serve alcun Request URL pubblico).
+#
+# Dopo la creazione restano due passaggi manuali, perche' i token non possono
+# stare in un manifest:
+#   1. Basic Information -> App-Level Tokens -> Generate Token and Scopes
+#      scope connections:write -> copia il token xapp-... in SLACK_APP_TOKEN
+#   2. Install App -> Install to Workspace -> Allow
+#      copia il Bot User OAuth Token xoxb-... in SLACK_BOT_TOKEN
+#
+# Se cambi il nome del comando qui, allinea SLACK_COMMAND nel .env (senza slash).
+
+display_information:
+  name: SEO Audit
+  description: Genera un SEO audit tecnico completo e lo consegna in PDF
+  background_color: "#1d4ed8"
+
+features:
+  bot_user:
+    display_name: SEO Audit
+    always_online: true
+  slash_commands:
+    - command: /seo-audit
+      description: Scansiona un dominio e genera un SEO audit tecnico in PDF
+      usage_hint: dominio.it [--max N] [--depth N]
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      # ricevere il comando slash
+      - commands
+      # pubblicare e aggiornare il messaggio di avanzamento
+      - chat:write
+      # allegare PDF e CSV nel canale
+      - files:write
+      # recuperare il permalink del file caricato
+      - files:read
+
+settings:
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  # niente webhook in ingresso: il bot apre una connessione in uscita verso Slack
+  socket_mode_enabled: true
+  token_rotation_enabled: false
